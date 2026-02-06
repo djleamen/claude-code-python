@@ -4,6 +4,7 @@ From CodeCrafters.io build-your-own-claude-code (Python)
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -50,7 +51,27 @@ def main():
     if not chat.choices or len(chat.choices) == 0:
         raise RuntimeError("no choices in response")
 
-    print(chat.choices[0].message.content)
+    message = chat.choices[0].message
+
+    # Check if there are tool calls
+    if message.tool_calls and len(message.tool_calls) > 0:
+        # Extract the first tool call
+        tool_call = message.tool_calls[0]
+        
+        # Parse the function name and arguments
+        function_name = tool_call.function.name
+        arguments_json = tool_call.function.arguments
+        arguments = json.loads(arguments_json)
+        
+        # Execute the Read tool
+        if function_name == "Read":
+            file_path = arguments["file_path"]
+            with open(file_path, "r") as f:
+                file_contents = f.read()
+            print(file_contents, end="")
+    else:
+        # Regular content response
+        print(message.content)
 
 
 if __name__ == "__main__":

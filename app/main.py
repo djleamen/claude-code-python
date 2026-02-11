@@ -6,6 +6,7 @@ From CodeCrafters.io build-your-own-claude-code (Python)
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 from openai import OpenAI
@@ -66,6 +67,23 @@ def main():
                         }
                     },
                     "required": ["file_path", "content"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "Bash",
+                "description": "Execute a shell command",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The command to execute"
+                        }
+                    },
+                    "required": ["command"]
                 }
             }
         }
@@ -139,6 +157,35 @@ def main():
                         tool_result = f"Successfully wrote to {file_path}"
                     except (IOError, OSError) as e:
                         tool_result = f"Error writing file: {str(e)}"
+
+                    # Add tool result to conversation
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": tool_result
+                    })
+
+                # Execute the Bash tool
+                elif function_name == "Bash":
+                    command = arguments["command"]
+                    try:
+                        result = subprocess.run(
+                            command,
+                            shell=True,
+                            capture_output=True,
+                            text=True,
+                            timeout=30,
+                            check=False
+                        )
+                        # Combine stdout and stderr
+                        output = result.stdout
+                        if result.stderr:
+                            output += result.stderr
+                        tool_result = output if output else "Command executed successfully"
+                    except subprocess.TimeoutExpired:
+                        tool_result = "Error: Command timed out after 30 seconds"
+                    except (OSError, ValueError) as e:
+                        tool_result = f"Error executing command: {str(e)}"
 
                     # Add tool result to conversation
                     messages.append({

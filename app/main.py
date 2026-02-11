@@ -9,6 +9,7 @@ import os
 import sys
 
 from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
 
 API_KEY = os.getenv("OPENROUTER_API_KEY")
 BASE_URL = os.getenv("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
@@ -26,10 +27,10 @@ def main():
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
     # Initialize conversation with user's prompt
-    messages = [{"role": "user", "content": args.p}]
+    messages: list[ChatCompletionMessageParam] = [{"role": "user", "content": args.p}]
 
     # Define tools
-    tools = [
+    tools: list[ChatCompletionToolParam] = [
         {
             "type": "function",
             "function": {
@@ -44,6 +45,27 @@ def main():
                         }
                     },
                     "required": ["file_path"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "Write",
+                "description": "Write content to a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "The path of the file to write to"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The content to write to the file"
+                        }
+                    },
+                    "required": ["file_path", "content"]
                 }
             }
         }
@@ -65,18 +87,19 @@ def main():
         message = choice.message
 
         # Build assistant message for conversation history
-        assistant_message = {"role": "assistant", "content": message.content}
+        assistant_message: ChatCompletionMessageParam = {"role": "assistant",
+                                                         "content": message.content}
         if message.tool_calls:
             assistant_message["tool_calls"] = [
                 {
-                    "id": tc.id,
+                    "id": tool_call.id,
                     "type": "function",
                     "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments
+                        "name": tool_call.function.name,
+                        "arguments": tool_call.function.arguments
                     }
                 }
-                for tc in message.tool_calls
+                for tool_call in message.tool_calls
             ]
 
         messages.append(assistant_message)
@@ -93,11 +116,29 @@ def main():
                 if function_name == "Read":
                     file_path = arguments["file_path"]
                     try:
-                        with open(file_path, "r") as f:
+                        with open(file_path, "r", encoding="utf-8") as f:
                             file_contents = f.read()
                         tool_result = file_contents
-                    except Exception as e:
+                    except (FileNotFoundError, IOError) as e:
                         tool_result = f"Error reading file: {str(e)}"
+
+                    # Add tool result to conversation
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": tool_result
+                    })
+
+                # Execute the Write tool
+                elif function_name == "Write":
+                    file_path = arguments["file_path"]
+                    content = arguments["content"]
+                    try:
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            f.write(content)
+                        tool_result = f"Successfully wrote to {file_path}"
+                    except (IOError, OSError) as e:
+                        tool_result = f"Error writing file: {str(e)}"
 
                     # Add tool result to conversation
                     messages.append({

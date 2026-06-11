@@ -9,7 +9,7 @@ import os
 import subprocess
 import sys
 
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
 
 API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -23,7 +23,8 @@ def main():
     args = p.parse_args()
 
     if not API_KEY:
-        raise RuntimeError("OPENROUTER_API_KEY is not set")
+        print("Error: OPENROUTER_API_KEY is not set", file=sys.stderr)
+        sys.exit(1)
 
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
@@ -128,24 +129,23 @@ def main():
             for tool_call in message.tool_calls:
                 function_name = tool_call.function.name
                 arguments_json = tool_call.function.arguments
-                arguments = json.loads(arguments_json)
+                try:
+                    arguments = json.loads(arguments_json)
+                except json.JSONDecodeError as e:
+                    arguments = None
+                    tool_result = f"Error parsing tool arguments: {str(e)}"
 
                 # Execute the Read tool
-                if function_name == "Read":
+                if arguments is None:
+                    pass  # tool_result already set to the parse error
+                elif function_name == "Read":
                     file_path = arguments["file_path"]
                     try:
                         with open(file_path, "r", encoding="utf-8") as f:
                             file_contents = f.read()
                         tool_result = file_contents
-                    except (FileNotFoundError, IOError) as e:
+                    except (FileNotFoundError, IOError, UnicodeDecodeError) as e:
                         tool_result = f"Error reading file: {str(e)}"
-
-                    # Add tool result to conversation
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": tool_result
-                    })
 
                 # Execute the Write tool
                 elif function_name == "Write":
@@ -157,13 +157,6 @@ def main():
                         tool_result = f"Successfully wrote to {file_path}"
                     except (IOError, OSError) as e:
                         tool_result = f"Error writing file: {str(e)}"
-
-                    # Add tool result to conversation
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": tool_result
-                    })
 
                 # Execute the Bash tool
                 elif function_name == "Bash":
@@ -187,12 +180,16 @@ def main():
                     except (OSError, ValueError) as e:
                         tool_result = f"Error executing command: {str(e)}"
 
-                    # Add tool result to conversation
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": tool_result
-                    })
+                # Unknown tool: still report back so the conversation stays valid
+                else:
+                    tool_result = f"Error: Unknown tool '{function_name}'"
+
+                # Add tool result to conversation
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": tool_result
+                })
             # Continue loop to send tool results back
         else:
             # No tool calls, we have the final response
@@ -202,4 +199,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except OpenAIError as e:
+        print(f"Error: {str(e)}", file=sys.stderr)
+        sys.exit(1)

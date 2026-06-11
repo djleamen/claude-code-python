@@ -131,7 +131,9 @@ def main():
                 arguments_json = tool_call.function.arguments
                 try:
                     arguments = json.loads(arguments_json)
-                except json.JSONDecodeError as e:
+                    if not isinstance(arguments, dict):
+                        raise ValueError("tool arguments must be a JSON object")
+                except (json.JSONDecodeError, TypeError, ValueError) as e:
                     arguments = None
                     tool_result = f"Error parsing tool arguments: {str(e)}"
 
@@ -139,26 +141,36 @@ def main():
                 if arguments is None:
                     pass  # tool_result already set to the parse error
                 elif function_name == "Read":
-                    file_path = arguments["file_path"]
-                    try:
-                        with open(file_path, "r", encoding="utf-8") as f:
-                            file_contents = f.read()
-                        tool_result = file_contents
-                    except (FileNotFoundError, IOError, UnicodeDecodeError) as e:
-                        tool_result = f"Error reading file: {str(e)}"
+                    file_path = arguments.get("file_path")
+                    if not isinstance(file_path, str):
+                        tool_result = "Error: missing required argument 'file_path'"
+                    else:
+                        try:
+                            with open(file_path, "r", encoding="utf-8") as f:
+                                file_contents = f.read()
+                            tool_result = file_contents
+                        except (FileNotFoundError, IOError, UnicodeDecodeError) as e:
+                            tool_result = f"Error reading file: {str(e)}"
 
                 # Execute the Write tool
                 elif function_name == "Write":
-                    file_path = arguments["file_path"]
-                    content = arguments["content"]
-                    try:
-                        with open(file_path, "w", encoding="utf-8") as f:
-                            f.write(content)
-                        tool_result = f"Successfully wrote to {file_path}"
-                    except (IOError, OSError) as e:
-                        tool_result = f"Error writing file: {str(e)}"
+                    file_path = arguments.get("file_path")
+                    content = arguments.get("content")
+                    if not isinstance(file_path, str) or not isinstance(content, str):
+                        tool_result = ("Error: missing required argument "
+                                       "'file_path' or 'content'")
+                    else:
+                        try:
+                            with open(file_path, "w", encoding="utf-8") as f:
+                                f.write(content)
+                            tool_result = f"Successfully wrote to {file_path}"
+                        except (IOError, OSError) as e:
+                            tool_result = f"Error writing file: {str(e)}"
 
                 # Execute the Bash tool
+                elif function_name == "Bash" and not isinstance(
+                        arguments.get("command"), str):
+                    tool_result = "Error: missing required argument 'command'"
                 elif function_name == "Bash":
                     command = arguments["command"]
                     try:
